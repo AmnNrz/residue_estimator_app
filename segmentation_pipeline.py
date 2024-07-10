@@ -13,47 +13,20 @@
 # ---
 
 # +
-import sys
-import numpy as np
 import cv2
-from time import sleep
-from datetime import datetime
 import os
-import numpy as np
-from random import shuffle
-from matplotlib import pyplot as plt
-import matplotlib as mpl
-from pandas import read_csv, read_excel, DataFrame
-import os
-
-from skimage.feature import local_binary_pattern as LBP
-from sklearn.model_selection import train_test_split
-from sklearn.experimental import enable_halving_search_cv  # noqa
-from sklearn.model_selection import HalvingGridSearchCV
-from sklearn.neural_network import MLPClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.pipeline import Pipeline
-import pickle
 import logging
 import glob
 from collections import defaultdict
-from utils_segmentation import (
-    get_features,
-    p3,
-    p0,
-    p00,
-    n_components,
-    plots,
-    cornfusion,
-)
 
+import numpy as np
+from utils_segmentation import get_features
 
 logging.basicConfig(level=logging.INFO)
 
 # +
 ##### Read an rgb image with its labels #####
-path_to_data = ("/mnt/C250892050891BF3/Projects/residue_estimator/images/")
+path_to_data = ("C:/Users/brand/AgAID/residue_estimator/images/")
 
 ### Function to find images
 def find_jpg_images(root_dir):
@@ -118,7 +91,6 @@ excluded_images = [img for img in original_paths if
 # print(excluded_images)
 dataset = []
 for path in filtered_original_images:
-    print()
     bgr = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     image_number = os.path.basename(path).split('.')[0]
     label_paths = [path for path in filtered_labels
@@ -138,6 +110,14 @@ for path in filtered_original_images:
                     "res_label": res_label,
                     "sunshad_label": sunshad_label})
     
-dataset
+n_feat = features.shape[1]
 
-    # res_label = cv2.imread()
+feats_raw = []
+comb_labels = []
+for sample in dataset:
+    feats_raw.append(sample["features"])
+    comb_labels.append(sample["sunshad_label"])
+del dataset
+
+feats_raw = np.array(feats_raw).reshape((-1, n_feat)).astype(np.float32)
+comb_labels = np.array(comb_labels).reshape((-1, 1)).astype(np.int32).ravel()
