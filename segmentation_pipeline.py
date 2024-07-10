@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.2
+#       jupytext_version: 1.15.1
 #   kernelspec:
 #     display_name: res_app
 #     language: python
@@ -125,7 +125,9 @@ for path in filtered_original_images:
                     if path.endswith(f'{image_number}' + '_res.tif')
                     or path.endswith(f'{image_number}' + '_sunshad.tif')]
     res_label = cv2.imread(label_paths[0], cv2.IMREAD_UNCHANGED)
+    res_label[res_label == 255] = 1
     sunshad_label = cv2.imread(label_paths[1], cv2.IMREAD_UNCHANGED)
+    sunshad_label[sunshad_label == 255] = 1
     comb_label = 2 * res_label + sunshad_label
     features = get_features(bgr)
 
@@ -137,7 +139,16 @@ for path in filtered_original_images:
                     "features": features,
                     "res_label": res_label,
                     "sunshad_label": sunshad_label})
-    
-dataset
 
-    # res_label = cv2.imread()
+
+n_feat = features.shape[1]
+
+feats_raw = []
+comb_labels = []
+for sample in dataset:
+    feats_raw.append(sample["features"])
+    comb_labels.append(sample["sunshad_label"])
+del dataset
+
+feats_raw = np.array(feats_raw).reshape((-1, n_feat)).astype(np.float32)
+comb_labels = np.array(comb_labels).reshape((-1, 1)).astype(np.int32).ravel()
