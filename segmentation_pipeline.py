@@ -151,13 +151,13 @@ for sample in dataset:
 del dataset
 
 # Reshape and type conversion
-feats_raw = np.array(feats_raw[0]).reshape((-1, n_feat)).astype(np.float32)
+feats_raw = np.array(feats_raw).reshape((-1, n_feat)).astype(np.float32)
 
 # Reshape comb_labels to a compatible shape
-comb_labels = np.array(comb_labels[0]).reshape((-1)).astype(np.int32)
+comb_labels = np.array(comb_labels).reshape((-1)).astype(np.int32)
 # -
 
-feats_raw.shape, comb_labels.shape
+filtered_original_images
 
 # +
 from sklearn.decomposition import IncrementalPCA
@@ -202,15 +202,125 @@ for layer1 in [2, 4]:
 print(layers)
 
 parameters = {"hidden_layer_sizes": layers, "activation": ("relu", "logistic")}
-# -
-
-search = HalvingGridSearchCV(
-    clf, parameters, n_jobs=-1, cv=5, verbose=3, aggressive_elimination=True
-)
-
-search.fit(train_feats_scaled_pca, train_labels)
 
 # +
+# search = HalvingGridSearchCV(
+#     clf, parameters, n_jobs=-1, cv=5, verbose=3, aggressive_elimination=True
+# )
+
+# +
+# search.fit(train_feats_scaled_pca, train_labels)
+
+# +
+# print("Best parameter (CV score=%0.3f):" % search.best_score_)
+# print(search.best_params_)
+# pipeline = Pipeline(
+#     steps=[("scaler", scaler), ("pca", incremental_pca), ("clf", search.best_estimator_)]
+# )
+
+# # filename = os.path.join(
+# #     p3, "model_pipeline_" + version + "_" + model + "_" + hy + "_final.pk.sav"
+# # )
+# # with open(filename, "wb") as f:  # Python 3: open(..., 'wb'
+# #     pickle.dump(pipeline, f)
+
+# pred = pipeline.predict(test_feats)
+
+# M, f, a = cornfusion(test_labels, pred, n_components)
+
+# plt.matshow(M) 
+# plt.ylabel("Predicted")
+# plt.xlabel("Observed")
+# plt.title(" Confusion Matrix")
+# -
+
+# # Partial fit 
+
+# +
+import numpy as np
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+from sklearn.experimental import enable_halving_search_cv  # noqa
+from sklearn.model_selection import HalvingGridSearchCV
+from sklearn.neural_network import MLPClassifier
+from sklearn.base import BaseEstimator, ClassifierMixin
+# Create a wrapper for MLPClassifier to handle 
+
+class IncrementalMLPClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(self, hidden_layer_sizes=(100,), activation='relu', solver='adam', alpha=0.0001,
+                 batch_size='auto', learning_rate='constant', learning_rate_init=0.001, power_t=0.5,
+                 max_iter=200, shuffle=True, random_state=None, tol=1e-4, verbose=False,
+                 warm_start=False, momentum=0.9, nesterovs_momentum=True, early_stopping=False,
+                 validation_fraction=0.1, beta_1=0.9, beta_2=0.999, epsilon=1e-8, n_iter_no_change=10,
+                 max_fun=15000):
+        self.hidden_layer_sizes = hidden_layer_sizes
+        self.activation = activation
+        self.solver = solver
+        self.alpha = alpha
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.learning_rate_init = learning_rate_init
+        self.power_t = power_t
+        self.max_iter = max_iter
+        self.shuffle = shuffle
+        self.random_state = random_state
+        self.tol = tol
+        self.verbose = verbose
+        self.warm_start = warm_start
+        self.momentum = momentum
+        self.nesterovs_momentum = nesterovs_momentum
+        self.early_stopping = early_stopping
+        self.validation_fraction = validation_fraction
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.epsilon = epsilon
+        self.n_iter_no_change = n_iter_no_change
+        self.max_fun = max_fun
+        self.classes_ = None
+        self.model = MLPClassifier(hidden_layer_sizes=self.hidden_layer_sizes, activation=self.activation, solver=self.solver,
+                                   alpha=self.alpha, batch_size=self.batch_size, learning_rate=self.learning_rate,
+                                   learning_rate_init=self.learning_rate_init, power_t=self.power_t, max_iter=self.max_iter,
+                                   shuffle=self.shuffle, random_state=self.random_state, tol=self.tol, verbose=self.verbose,
+                                   warm_start=self.warm_start, momentum=self.momentum, nesterovs_momentum=self.nesterovs_momentum,
+                                   early_stopping=self.early_stopping, validation_fraction=self.validation_fraction,
+                                   beta_1=self.beta_1, beta_2=self.beta_2, epsilon=self.epsilon, n_iter_no_change=self.n_iter_no_change,
+                                   max_fun=self.max_fun)
+    
+    def partial_fit(self, X, y, classes=None):
+        if self.classes_ is None:
+            self.classes_ = np.unique(y) if classes is None else classes
+        self.model.partial_fit(X, y, classes=self.classes_)
+        return self
+    
+    def fit(self, X, y):
+        for _ in range(10):  # Example: 10 epochs
+            self.partial_fit(X, y)
+        return self
+    
+    def predict(self, X):
+        return self.model.predict(X)
+    
+    def score(self, X, y):
+        return self.model.score(X, y)
+
+
+
+
+
+# Use HalvingGridSearchCV
+search = HalvingGridSearchCV(
+    IncrementalMLPClassifier(),
+    parameters,
+    cv=5,  # 3-fold cross-validation
+    verbose=3,
+    n_jobs=-1,
+    aggressive_elimination=True
+)
+
+
+# Fit the model using HalvingGridSearchCV
+search.fit(train_feats_scaled_pca, train_labels)
+
 print("Best parameter (CV score=%0.3f):" % search.best_score_)
 print(search.best_params_)
 pipeline = Pipeline(
