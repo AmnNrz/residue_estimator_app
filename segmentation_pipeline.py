@@ -19,8 +19,16 @@ import logging
 import glob
 from collections import defaultdict
 
+from matplotlib import pyplot as plt
 import numpy as np
-from utils_segmentation import get_features
+from sklearn.discriminant_analysis import StandardScaler
+from sklearn.experimental import enable_halving_search_cv
+from sklearn.model_selection import HalvingGridSearchCV, train_test_split
+from sklearn.neural_network import MLPClassifier
+from sklearn.pipeline import Pipeline
+from utils_segmentation import confusion, get_features
+from sklearn.decomposition import IncrementalPCA
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -98,6 +106,9 @@ for path in filtered_original_images:
                     or path.endswith(f'{image_number}' + '_sunshad.tif')]
     res_label = cv2.imread(label_paths[0], cv2.IMREAD_UNCHANGED)
     sunshad_label = cv2.imread(label_paths[1], cv2.IMREAD_UNCHANGED)
+    # Convert to binary labels
+    res_label[res_label == 255] = 1
+    sunshad_label[sunshad_label == 255] = 1
     comb_label = 2 * res_label + sunshad_label
     features = get_features(bgr)
 
@@ -119,5 +130,78 @@ for sample in dataset:
     comb_labels.append(sample["sunshad_label"])
 del dataset
 
+# Reshape and type conversion
 feats_raw = np.array(feats_raw).reshape((-1, n_feat)).astype(np.float32)
-comb_labels = np.array(comb_labels).reshape((-1, 1)).astype(np.int32).ravel()
+
+# Reshape comb_labels to a compatible shape
+comb_labels = np.array(comb_labels).reshape((-1)).astype(np.int32)
+
+# Split the data
+train_feats, test_feats, train_labels, test_labels = train_test_split(
+    feats_raw, comb_labels, test_size=0.2, random_state=42
+)
+
+# Standardize the data
+scaler = StandardScaler()
+train_feats_scaled = scaler.fit_transform(train_feats)
+
+# Apply Incremental PCA
+n_components = 2  # Or any other suitable value
+batch_size = 1000  # Adjust the batch size according to your memory capacity
+incremental_pca = IncrementalPCA(n_components=n_components)
+
+for i in range(0, train_feats_scaled.shape[0], batch_size):
+    incremental_pca.partial_fit(train_feats_scaled[i:i+batch_size])
+
+train_feats_scaled_pca = np.zeros((train_feats_scaled.shape[0], incremental_pca.n_components_))
+
+for i in range(0, train_feats_scaled.shape[0], batch_size):
+    train_feats_scaled_pca[i:i+batch_size] = incremental_pca.transform(train_feats_scaled[i:i+batch_size])
+
+# +
+clf = MLPClassifier(max_iter=1000)
+n_feat = train_feats_scaled_pca.shape[1]
+# tune hyperparameters
+print(n_feat)
+
+layers = []
+for layer1 in [2, 4]:
+    for layer2 in [4, 8]:
+        layer = (
+            int(layer1 * n_feat),
+            int(np.sqrt(layer1 * n_feat * layer2 * n_components)),
+            layer2 * n_components,
+        )
+        layers.append(layer)
+print(layers)
+
+parameters = {"hidden_layer_sizes": layers, "activation": ("relu", "logistic")}
+# -
+
+search = HalvingGridSearchCV(
+    clf, parameters, n_jobs=-1, cv=5, verbose=3, aggressive_elimination=True
+)
+
+search.fit(train_feats_scaled_pca, train_labels)
+
+# +
+print("Best parameter (CV score=%0.3f):" % search.best_score_)
+print(search.best_params_)
+pipeline = Pipeline(
+    steps=[("scaler", scaler), ("pca", incremental_pca), ("clf", search.best_estimator_)]
+)
+
+# filename = os.path.join(
+#     p3, "model_pipeline_" + version + "_" + model + "_" + hy + "_final.pk.sav"
+# )
+# with open(filename, "wb") as f:  # Python 3: open(..., 'wb'
+#     pickle.dump(pipeline, f)
+
+pred = pipeline.predict(test_feats)
+
+M, f, a = confusion(test_labels, pred, n_components)
+
+plt.matshow(M) 
+plt.ylabel("Predicted")
+plt.xlabel("Observed")
+plt.title(" Confusion Matrix")
