@@ -205,3 +205,4 @@ plt.matshow(M)
 plt.ylabel("Predicted")
 plt.xlabel("Observed")
 plt.title(" Confusion Matrix")
+plt.show()  # Show the plot
