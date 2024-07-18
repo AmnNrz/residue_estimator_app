@@ -1,38 +1,24 @@
-# ---
-# jupyter:
-#   jupytext:
-#     text_representation:
-#       extension: .py
-#       format_name: light
-#       format_version: '1.5'
-#       jupytext_version: 1.16.2
-#   kernelspec:
-#     display_name: res_app
-#     language: python
-#     name: python3
-# ---
-
-# +
 import cv2
 import os
 import logging
 import glob
+import seaborn as sn
 from collections import defaultdict
 
 from matplotlib import pyplot as plt
 import numpy as np
-from sklearn.discriminant_analysis import StandardScaler
-from sklearn.experimental import enable_halving_search_cv
-from sklearn.model_selection import HalvingGridSearchCV, train_test_split
-from sklearn.neural_network import MLPClassifier
-from sklearn.pipeline import Pipeline
-from utils_segmentation import confusion, get_features
-from sklearn.decomposition import IncrementalPCA
+import pandas as pd
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import tensorflow as tf; tf.keras
+from tensorflow.keras.models import Sequential # type: ignore
+from tensorflow.keras.layers import Dense # type: ignore
+from tensorflow.keras.callbacks import EarlyStopping # type: ignore
+from utils_segmentation import get_features
 
 
 logging.basicConfig(level=logging.INFO)
 
-# +
 ##### Read an rgb image with its labels #####
 path_to_data = ("C:/Users/brand/AgAID/residue_estimator/images/")
 
@@ -90,13 +76,6 @@ filtered_labels = [label for label in label_paths if
 excluded_images = [img for img in original_paths if 
                    extract_image_number(img) not in valid_image_numbers]
 
-# # Print results
-# print("Filtered Original Images:")
-# print(filtered_original_images)
-# print("\nFiltered Labels:")
-# print(filtered_labels)
-# print("\nExcluded Images:")
-# print(excluded_images)
 dataset = []
 for path in filtered_original_images:
     bgr = cv2.imread(path, cv2.IMREAD_UNCHANGED)
@@ -144,65 +123,52 @@ train_feats, test_feats, train_labels, test_labels = train_test_split(
 # Standardize the data
 scaler = StandardScaler()
 train_feats_scaled = scaler.fit_transform(train_feats)
+test_feats_scaled = scaler.transform(test_feats)
 
-# Apply Incremental PCA
-n_components = 2  # Or any other suitable value
-batch_size = 1000  # Adjust the batch size according to your memory capacity
-incremental_pca = IncrementalPCA(n_components=n_components)
+# Define the neural network model using TensorFlow/Keras
+model = Sequential()
+model.add(Dense(128, input_dim=train_feats_scaled.shape[1], activation='relu'))
+model.add(Dense(64, activation='relu'))
+model.add(Dense(32, activation='relu'))
+model.add(Dense(1, activation='sigmoid'))
 
-for i in range(0, train_feats_scaled.shape[0], batch_size):
-    incremental_pca.partial_fit(train_feats_scaled[i:i+batch_size])
+# Compile the model
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
-train_feats_scaled_pca = np.zeros((train_feats_scaled.shape[0], incremental_pca.n_components_))
+# Define early stopping
+early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
-for i in range(0, train_feats_scaled.shape[0], batch_size):
-    train_feats_scaled_pca[i:i+batch_size] = incremental_pca.transform(train_feats_scaled[i:i+batch_size])
+# Train the model
+history = model.fit(train_feats_scaled, train_labels, epochs=1, batch_size=32,
+                    validation_split=0.2, callbacks=[early_stopping])
 
-# +
-clf = MLPClassifier(max_iter=1000)
-n_feat = train_feats_scaled_pca.shape[1]
-# tune hyperparameters
-print(n_feat)
+# Save the model in the TensorFlow keras format
+model.save('saved_models/model.keras')
+# Save the model in HDF5 format
+# model.save('saved_models/model1.h5')
+# Export the model as saved model
+model.export("saved_models/exported_model")
 
-layers = []
-for layer1 in [2, 4]:
-    for layer2 in [4, 8]:
-        layer = (
-            int(layer1 * n_feat),
-            int(np.sqrt(layer1 * n_feat * layer2 * n_components)),
-            layer2 * n_components,
-        )
-        layers.append(layer)
-print(layers)
+# Predict on the test data
+predictions = model.predict(test_feats_scaled)
+predictions = (predictions > 0.5).astype(int)
 
-parameters = {"hidden_layer_sizes": layers, "activation": ("relu", "logistic")}
-# -
+# Compute confusion matrix
+cm = tf.math.confusion_matrix(test_labels, predictions).numpy()
 
-search = HalvingGridSearchCV(
-    clf, parameters, n_jobs=-1, cv=5, verbose=3, aggressive_elimination=True
-)
+# Normalize the confusion matrix
+cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
 
-search.fit(train_feats_scaled_pca, train_labels)
+# Convert to percentages
+cm_percent = cm_normalized * 100
 
-# +
-print("Best parameter (CV score=%0.3f):" % search.best_score_)
-print(search.best_params_)
-pipeline = Pipeline(
-    steps=[("scaler", scaler), ("pca", incremental_pca), ("clf", search.best_estimator_)]
-)
+# Plot the normalized confusion matrix
+df_cm = pd.DataFrame(cm_percent, index=range(2), columns=range(2))
+sn.set_theme(font_scale=1.4)  # for label size
+sn.heatmap(df_cm, annot=True, fmt=".2f", annot_kws={"size": 16}, cmap='Blues')  # font size and color map
+plt.title('Normalized Confusion Matrix (Percentages)')
+plt.xlabel('Predicted label')
+plt.ylabel('True label')
+plt.show()
 
-# filename = os.path.join(
-#     p3, "model_pipeline_" + version + "_" + model + "_" + hy + "_final.pk.sav"
-# )
-# with open(filename, "wb") as f:  # Python 3: open(..., 'wb'
-#     pickle.dump(pipeline, f)
 
-pred = pipeline.predict(test_feats)
-
-M, f, a = confusion(test_labels, pred, n_components)
-
-plt.matshow(M) 
-plt.ylabel("Predicted")
-plt.xlabel("Observed")
-plt.title(" Confusion Matrix")
-plt.show()  # Show the plot

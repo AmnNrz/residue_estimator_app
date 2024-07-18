@@ -12,23 +12,6 @@ def localSD(mat, n):
 
     return sd
 
-def confusion(obs, pred, nclass):
-    M = np.zeros((nclass, nclass))
-    for i in range(obs.shape[0]):
-        o = obs[i]
-        p = pred[i]
-        M[o, p] = M[o, p] + 1
-    correct = sum(obs == pred)
-    total = len(pred)
-    M = M / np.sum(np.sum(M))
-    recall = np.diag(M) / np.sum(M, axis=1)
-    precis = np.diag(M) / np.sum(M, axis=0)
-
-    f1 = recall * precis / (recall + precis) * 2
-    f1_weighted = np.sum(f1 * np.sum(M, axis=1))
-
-    return M, f1_weighted, correct / total
-
 def get_features(bgr):
     lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
