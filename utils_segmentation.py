@@ -1,7 +1,11 @@
+from matplotlib import pyplot as plt
 import numpy as np
 import cv2
 
+import pandas as pd
+import seaborn as sn
 from skimage.feature import local_binary_pattern as LBP
+import tensorflow as tf
 
 def localSD(mat, n):
     mat = np.float32(mat)
@@ -42,3 +46,22 @@ def get_features(bgr):
         ravels.append(cf.ravel().T)
     feat = np.vstack(ravels).T
     return feat
+
+def confusion(test_labels, predicted_classes):
+    # Compute confusion matrix
+    cm = tf.math.confusion_matrix(test_labels, predicted_classes).numpy()
+
+    # Normalize the confusion matrix
+    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+    # Convert to percentages
+    cm_percent = cm_normalized * 100
+
+    # Plot the normalized confusion matrix
+    df_cm = pd.DataFrame(cm_percent, index=range(4), columns=range(4))
+    sn.set_theme(font_scale=1.4)  # for label size
+    sn.heatmap(df_cm, annot=True, fmt=".2f", annot_kws={"size": 16}, cmap='Blues')  # font size and color map
+    plt.title('Normalized Confusion Matrix (Percentages)')
+    plt.xlabel('Predicted label')
+    plt.ylabel('True label')
+    plt.show()

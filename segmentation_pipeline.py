@@ -14,7 +14,7 @@ import tensorflow as tf; tf.keras
 from tensorflow.keras.models import Sequential # type: ignore
 from tensorflow.keras.layers import Dense # type: ignore
 from tensorflow.keras.callbacks import EarlyStopping # type: ignore
-from utils_segmentation import get_features
+from utils_segmentation import confusion, get_features
 
 
 logging.basicConfig(level=logging.INFO)
@@ -76,7 +76,7 @@ filtered_labels = [label for label in label_paths if
 excluded_images = [img for img in original_paths if 
                    extract_image_number(img) not in valid_image_numbers]
 
-dataset = []
+feats_raw, comb_labels = [], []
 for path in filtered_original_images:
     bgr = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     image_number = os.path.basename(path).split('.')[0]
@@ -86,28 +86,16 @@ for path in filtered_original_images:
     res_label = cv2.imread(label_paths[0], cv2.IMREAD_UNCHANGED)
     sunshad_label = cv2.imread(label_paths[1], cv2.IMREAD_UNCHANGED)
     # Convert to binary labels
-    res_label[res_label == 255] = 1
-    sunshad_label[sunshad_label == 255] = 1
+    res_label[res_label == 255] = 1 # Nonresidue: 0, Residue: 1
+    sunshad_label[sunshad_label == 255] = 1 # Shaded: 0 , Sunlit: 1
     comb_label = 2 * res_label + sunshad_label
     features = get_features(bgr)
 
-    res_label = res_label.ravel()
-    sunshad_label = sunshad_label.ravel()
-    comb_label = comb_label.ravel()
+    feats_raw.append(features)
+    comb_labels.append(comb_label)
 
-    dataset.append({"bgr": bgr, 
-                    "features": features,
-                    "res_label": res_label,
-                    "sunshad_label": sunshad_label})
     
 n_feat = features.shape[1]
-
-feats_raw = []
-comb_labels = []
-for sample in dataset:
-    feats_raw.append(sample["features"])
-    comb_labels.append(sample["sunshad_label"])
-del dataset
 
 # Reshape and type conversion
 feats_raw = np.array(feats_raw).reshape((-1, n_feat)).astype(np.float32)
@@ -130,16 +118,16 @@ model = Sequential()
 model.add(Dense(128, input_dim=train_feats_scaled.shape[1], activation='relu'))
 model.add(Dense(64, activation='relu'))
 model.add(Dense(32, activation='relu'))
-model.add(Dense(1, activation='sigmoid'))
+model.add(Dense(4, activation='softmax'))
 
 # Compile the model
-model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
 # Define early stopping
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
 # Train the model
-history = model.fit(train_feats_scaled, train_labels, epochs=1, batch_size=32,
+history = model.fit(train_feats_scaled, train_labels, epochs=10, batch_size=32,
                     validation_split=0.2, callbacks=[early_stopping])
 
 # Save the model in the TensorFlow keras format
@@ -151,24 +139,10 @@ model.export("saved_models/exported_model")
 
 # Predict on the test data
 predictions = model.predict(test_feats_scaled)
-predictions = (predictions > 0.5).astype(int)
+predicted_classes = np.argmax(predictions, axis=1)
 
-# Compute confusion matrix
-cm = tf.math.confusion_matrix(test_labels, predictions).numpy()
+confusion(predicted_classes=predicted_classes, test_labels=test_labels)
 
-# Normalize the confusion matrix
-cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
 
-# Convert to percentages
-cm_percent = cm_normalized * 100
-
-# Plot the normalized confusion matrix
-df_cm = pd.DataFrame(cm_percent, index=range(2), columns=range(2))
-sn.set_theme(font_scale=1.4)  # for label size
-sn.heatmap(df_cm, annot=True, fmt=".2f", annot_kws={"size": 16}, cmap='Blues')  # font size and color map
-plt.title('Normalized Confusion Matrix (Percentages)')
-plt.xlabel('Predicted label')
-plt.ylabel('True label')
-plt.show()
 
 
