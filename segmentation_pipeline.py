@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+from sklearn.utils import compute_class_weight
 import tensorflow as tf; tf.keras
 from tensorflow.keras.models import Sequential # type: ignore
 from tensorflow.keras.layers import Dense # type: ignore
@@ -76,6 +77,7 @@ filtered_labels = [label for label in label_paths if
 excluded_images = [img for img in original_paths if 
                    extract_image_number(img) not in valid_image_numbers]
 
+print('Generating features and getting labels')
 feats_raw, comb_labels = [], []
 for path in filtered_original_images:
     bgr = cv2.imread(path, cv2.IMREAD_UNCHANGED)
@@ -97,22 +99,33 @@ for path in filtered_original_images:
     
 n_feat = features.shape[1]
 
+print('Reshaping features and lable arrays')
 # Reshape and type conversion
 feats_raw = np.array(feats_raw).reshape((-1, n_feat)).astype(np.float32)
 
 # Reshape comb_labels to a compatible shape
 comb_labels = np.array(comb_labels).reshape((-1)).astype(np.int32)
 
+print('Creating data splits')
 # Split the data
 train_feats, test_feats, train_labels, test_labels = train_test_split(
     feats_raw, comb_labels, test_size=0.2, random_state=42
 )
 
+print('Standardizing data')
 # Standardize the data
 scaler = StandardScaler()
 train_feats_scaled = scaler.fit_transform(train_feats)
 test_feats_scaled = scaler.transform(test_feats)
 
+print('Calculating class weights')
+# Calculate class weights
+class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
+class_weights = {i: class_weights[i] for i in range(len(class_weights))}
+print('Class weights:')
+print(class_weights)
+
+print('Initializing the model')
 # Define the neural network model using TensorFlow/Keras
 model = Sequential()
 model.add(Dense(128, input_dim=train_feats_scaled.shape[1], activation='relu'))
@@ -126,10 +139,12 @@ model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=
 # Define early stopping
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
+print('Training the model')
 # Train the model
-history = model.fit(train_feats_scaled, train_labels, epochs=10, batch_size=32,
-                    validation_split=0.2, callbacks=[early_stopping])
+history = model.fit(train_feats_scaled, train_labels, epochs=100, batch_size=32,
+                    validation_split=0.2, callbacks=[early_stopping], class_weight=class_weights)
 
+print('Saving the model')
 # Save the model in the TensorFlow keras format
 model.save('saved_models/model.keras')
 # Save the model in HDF5 format
@@ -137,6 +152,7 @@ model.save('saved_models/model.keras')
 # Export the model as saved model
 model.export("saved_models/exported_model")
 
+print('Testing the model')
 # Predict on the test data
 predictions = model.predict(test_feats_scaled)
 predicted_classes = np.argmax(predictions, axis=1)
