@@ -1,13 +1,9 @@
-
-
-# Load the TFLite model
 from collections import defaultdict
 import glob
 import os
-import sys
-
 import cv2
 import numpy as np
+from sklearn.metrics import accuracy_score
 from sklearn.discriminant_analysis import StandardScaler
 import tensorflow as tf
 
@@ -111,8 +107,6 @@ test_feats_scaled = scaler.fit_transform(feats_raw)
 tflite_model_file = './saved_models/exported_model.tflite'
 interpreter = tf.lite.Interpreter(model_path=tflite_model_file)
 
-interpreter.allocate_tensors()
-
 # Get input and output tensors
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
@@ -122,22 +116,22 @@ print(output_details)
 
 # Test the TFLite model on the test data
 input_shape = input_details[0]['shape']
-input_data = np.array(test_feats_scaled, dtype=np.float32)
-if input_data.shape[1] == input_shape[1]:  # Assuming input_data has shape (num_samples, num_features)
-    input_data = input_data.reshape((-1, input_shape[1]))
-else:
-    raise ValueError(f"Unexpected input shape: {input_data.shape}. Expected shape: {input_shape}")
 
 predictions = []
 print("Running inference")
-print(input_data.shape)
-for i in range(input_data.shape[0]):
-    interpreter.set_tensor(input_details[0]['index'], input_data[i:i+1])  # Use i:i+1 to preserve batch dimension
-    interpreter.invoke()
-    output_data = interpreter.get_tensor(output_details[0]['index'])
-    predictions.append(output_data)
+print(test_feats_scaled.shape)
+
+interpreter.resize_tensor_input(input_details[0]['index'], [test_feats_scaled.shape[0], test_feats_scaled.shape[1]])
+interpreter.allocate_tensors()
+interpreter.set_tensor(input_details[0]['index'], test_feats_scaled)
+interpreter.invoke()
+output_data = interpreter.get_tensor(output_details[0]['index'])
 
 print('Calculating results')
-np.set_printoptions(threshold=sys.maxsize)
-print(len(predictions))
-print(comb_labels)
+# Assuming output_data contains logits for 4 classes
+# Convert logits to predicted class labels using np.argmax
+predicted_labels = np.argmax(output_data, axis=1)
+
+# Calculate accuracy
+accuracy = accuracy_score(comb_labels, predicted_labels)
+print(f'Accuracy: {accuracy}')
