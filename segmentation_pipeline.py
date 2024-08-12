@@ -1,57 +1,30 @@
 import cv2
 import os
 import logging
-import glob
-import seaborn as sn
-from collections import defaultdict
+from collections import Counter, defaultdict
 
-from matplotlib import pyplot as plt
 import numpy as np
-import pandas as pd
+from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.utils import compute_class_weight
-import tensorflow as tf; tf.keras
+import tensorflow as tf
+
+from image_data_generator import ImageDataGenerator
 from tensorflow.keras.models import Sequential # type: ignore
 from tensorflow.keras.layers import Dense # type: ignore
 from tensorflow.keras.callbacks import EarlyStopping # type: ignore
-from utils_segmentation import confusion, get_features
-
+from utils_segmentation import calculate_class_weights, confusion, extract_image_number, find_jpg_images, find_tif_labels, get_batch_features_and_labels, get_features
 
 logging.basicConfig(level=logging.INFO)
 
 ##### Read an rgb image with its labels #####
 path_to_data = ("C:/Users/brand/AgAID/residue_estimator/images/")
 
-### Function to find images
-def find_jpg_images(root_dir):
-    jpg_image = []
-    for dir_name,a,b in os.walk(root_dir):
-        search_pattern = os.path.join(dir_name, '*.jpg')
-        for filename in glob.glob(search_pattern):
-            jpg_image.append(filename)
-    return jpg_image    
-
-# Function to find labels
-def find_tif_labels(root_dir):
-    tif_labels = []
-    for dir_name, _, _ in os.walk(root_dir):
-        search_pattern = os.path.join(dir_name, '*.tif')
-        for filename in glob.glob(search_pattern):
-            tif_labels.append(filename)
-    return tif_labels
-
-# Check if labels exist for each image
-path_to_original = path_to_data + "original/"
-original_paths = find_jpg_images(path_to_original)
-
-path_to_labels = path_to_data + "label/"
-label_paths = find_tif_labels(path_to_labels)
-
-# Extract image numbers from file paths
-def extract_image_number(file_path):
-    base_name = os.path.basename(file_path)
-    return base_name.split('_')[1].split('.')[0]
+# Get the paths for all the original images and the tif labels
+print('Finding original and label paths')
+original_paths = find_jpg_images(path_to_data + "original/")
+label_paths = find_tif_labels(path_to_data + "label/")
 
 # Group labels by image number
 label_dict = defaultdict(set)
@@ -62,73 +35,46 @@ for label in label_paths:
 # Find valid image numbers that have both _res.tif and _sunshad.tif
 valid_image_numbers = {
     image_number for image_number, files in label_dict.items()
-    if len(files) == 2 and any('_res.tif' in file
-                                for file in files) and 
+    if len(files) == 2 and any('_res.tif' in file for file in files) and 
                                 any('_sunshad.tif' in file for file in files)
 }
 
-# Filter original images and labels
-filtered_original_images = [img for img in original_paths if
-                             extract_image_number(img) in valid_image_numbers]
-filtered_labels = [label for label in label_paths if
-                    extract_image_number(label) in valid_image_numbers]
+# Create a dictionary of image numbers to paths, filtering by valid_image_numbers
+img_dict = {
+    image_number: path
+    for path in original_paths
+    if (image_number := extract_image_number(path)) in valid_image_numbers
+}
 
-# List excluded images
-excluded_images = [img for img in original_paths if 
-                   extract_image_number(img) not in valid_image_numbers]
+# Remove invalid image numbers from label dict (that do not have _res.tif and _sunshad.tif)
+invalid_image_numbers = [img_num for img_num in label_dict if img_num not in valid_image_numbers]
+for img_num in invalid_image_numbers:
+    label_dict.pop(img_num)
 
-print('Generating features and getting labels')
-feats_raw, comb_labels = [], []
-for path in filtered_original_images:
-    bgr = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-    image_number = os.path.basename(path).split('.')[0]
-    label_paths = [path for path in filtered_labels
-                    if path.endswith(f'{image_number}' + '_res.tif')
-                    or path.endswith(f'{image_number}' + '_sunshad.tif')]
-    res_label = cv2.imread(label_paths[0], cv2.IMREAD_UNCHANGED)
-    sunshad_label = cv2.imread(label_paths[1], cv2.IMREAD_UNCHANGED)
-    # Convert to binary labels
-    res_label[res_label == 255] = 1 # Nonresidue: 0, Residue: 1
-    sunshad_label[sunshad_label == 255] = 1 # Shaded: 0 , Sunlit: 1
-    comb_label = 2 * res_label + sunshad_label
-    features = get_features(bgr)
+# Note that valid_image_numbers now map the valid numbers(ids) to the respective image paths and label paths
 
-    feats_raw.append(features)
-    comb_labels.append(comb_label)
+# Assuming `valid_image_numbers` is already filtered with valid images
+valid_image_numbers = list(valid_image_numbers)
 
-    
-n_feat = features.shape[1]
+# Create lists of image paths and label paths
+batch_size = 1  # Adjust as needed
+n_features = 108  # Number of features, replace with the actual number
 
-print('Reshaping features and lable arrays')
-# Reshape and type conversion
-feats_raw = np.array(feats_raw).reshape((-1, n_feat)).astype(np.float32)
+image_paths = [img_dict[img_num] for img_num in valid_image_numbers]
+label_paths = [list(label_dict[img_num]) for img_num in valid_image_numbers]
 
-# Reshape comb_labels to a compatible shape
-comb_labels = np.array(comb_labels).reshape((-1)).astype(np.int32)
-
-print('Creating data splits')
-# Split the data
-train_feats, test_feats, train_labels, test_labels = train_test_split(
-    feats_raw, comb_labels, test_size=0.2, random_state=42
-)
-
-print('Standardizing data')
-# Standardize the data
-scaler = StandardScaler()
-train_feats_scaled = scaler.fit_transform(train_feats)
-test_feats_scaled = scaler.transform(test_feats)
+# Initialize the data generator
+train_data_generator = ImageDataGenerator(image_paths=image_paths, label_paths=label_paths, batch_size=batch_size, n_features=n_features, mode='train')
+val_data_generator = ImageDataGenerator(image_paths=image_paths, label_paths=label_paths, batch_size=batch_size, n_features=n_features, mode='val')
+test_data_generator = ImageDataGenerator(image_paths=image_paths, label_paths=label_paths, batch_size=batch_size, n_features=n_features, mode='test')
 
 print('Calculating class weights')
-# Calculate class weights
-class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
-class_weights = {i: class_weights[i] for i in range(len(class_weights))}
-print('Class weights:')
-print(class_weights)
+class_weights = calculate_class_weights(label_paths)
 
 print('Initializing the model')
 # Define the neural network model using TensorFlow/Keras
 model = Sequential()
-model.add(Dense(128, input_dim=train_feats_scaled.shape[1], activation='relu'))
+model.add(Dense(128, input_dim=108, activation='relu')) # Input dimension = number of features, make sure to adjust accordingly
 model.add(Dense(64, activation='relu'))
 model.add(Dense(32, activation='relu'))
 model.add(Dense(4, activation='softmax'))
@@ -139,26 +85,32 @@ model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=
 # Define early stopping
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 
+# Train the model using the data generator
 print('Training the model')
-# Train the model
-history = model.fit(train_feats_scaled, train_labels, epochs=100, batch_size=32,
-                    validation_split=0.2, callbacks=[early_stopping], class_weight=class_weights)
+model.fit(
+    train_data_generator,
+    epochs=2,
+    callbacks=[early_stopping],
+    validation_data=val_data_generator,
+    class_weight=class_weights
+)
+
+print('Testing the model on the test dataset')
+predictions = model.predict(test_data_generator)
+predicted_classes = np.argmax(predictions, axis=1)
+
+# Collect all the test labels for accuracy computation
+all_test_labels = np.concatenate([test_data_generator[i][1] for i in range(len(test_data_generator))])
+
+# Calculate the overall testing accuracy
+accuracy = accuracy_score(all_test_labels, predicted_classes)
+print(f'Overall Testing Accuracy: {accuracy}')
+
+confusion(predicted_classes=predicted_classes, test_labels=all_test_labels)
 
 print('Saving the model')
-# Save the model in the TensorFlow keras format
 model.save('saved_models/model.keras')
 # Save the model in HDF5 format
 # model.save('saved_models/model1.h5')
 # Export the model as saved model
 model.export("saved_models/exported_model")
-
-print('Testing the model')
-# Predict on the test data
-predictions = model.predict(test_feats_scaled)
-predicted_classes = np.argmax(predictions, axis=1)
-
-confusion(predicted_classes=predicted_classes, test_labels=test_labels)
-
-
-
-

@@ -1,13 +1,13 @@
 from collections import defaultdict
-import glob
 import os
 import cv2
 import numpy as np
 from sklearn.metrics import accuracy_score
 from sklearn.discriminant_analysis import StandardScaler
+from sklearn.model_selection import train_test_split
 import tensorflow as tf
 
-from utils_segmentation import get_features
+from utils_segmentation import confusion, find_jpg_images, find_tif_labels, get_features
 
 
 tflite_model_file = './saved_models/exported_model.tflite'
@@ -15,24 +15,6 @@ interpreter = tf.lite.Interpreter(model_path=tflite_model_file)
 
 ##### Read an rgb image with its labels #####
 path_to_data = ("C:/Users/brand/AgAID/residue_estimator/images/")
-
-### Function to find images
-def find_jpg_images(root_dir):
-    jpg_image = []
-    for dir_name,a,b in os.walk(root_dir):
-        search_pattern = os.path.join(dir_name, '*.jpg')
-        for filename in glob.glob(search_pattern):
-            jpg_image.append(filename)
-    return jpg_image    
-
-# Function to find labels
-def find_tif_labels(root_dir):
-    tif_labels = []
-    for dir_name, _, _ in os.walk(root_dir):
-        search_pattern = os.path.join(dir_name, '*.tif')
-        for filename in glob.glob(search_pattern):
-            tif_labels.append(filename)
-    return tif_labels
 
 # Check if labels exist for each image
 path_to_original = path_to_data + "original/"
@@ -98,10 +80,16 @@ feats_raw = np.array(feats_raw).reshape((-1, n_feat)).astype(np.float32)
 # Reshape comb_labels to a compatible shape
 comb_labels = np.array(comb_labels).reshape((-1)).astype(np.int32)
 
+print('Creating data splits')
+# Split the data
+train_feats, test_feats, train_labels, test_labels = train_test_split(
+    feats_raw, comb_labels, test_size=0.2, random_state=42
+)
+
 print('Standardizing features')
 # Standardize the data
 scaler = StandardScaler()
-test_feats_scaled = scaler.fit_transform(feats_raw)
+test_feats_scaled = scaler.fit_transform(test_feats)
 
 # Load the TFLite model
 tflite_model_file = './saved_models/exported_model.tflite'
@@ -133,5 +121,6 @@ print('Calculating results')
 predicted_labels = np.argmax(output_data, axis=1)
 
 # Calculate accuracy
-accuracy = accuracy_score(comb_labels, predicted_labels)
+accuracy = accuracy_score(test_labels, predicted_labels)
 print(f'Accuracy: {accuracy}')
+confusion(predicted_classes=predicted_labels, test_labels=test_labels)

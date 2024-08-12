@@ -1,3 +1,5 @@
+import glob
+import os
 from matplotlib import pyplot as plt
 import numpy as np
 import cv2
@@ -5,7 +7,32 @@ import cv2
 import pandas as pd
 import seaborn as sn
 from skimage.feature import local_binary_pattern as LBP
+from sklearn.model_selection import train_test_split
+from sklearn.utils import compute_class_weight
 import tensorflow as tf
+
+### Function to find images
+def find_jpg_images(root_dir):
+    jpg_image = []
+    for dir_name,a,b in os.walk(root_dir):
+        search_pattern = os.path.join(dir_name, '*.jpg')
+        for filename in glob.glob(search_pattern):
+            jpg_image.append(filename)
+    return jpg_image    
+
+# Function to find labels
+def find_tif_labels(root_dir):
+    tif_labels = []
+    for dir_name, _, _ in os.walk(root_dir):
+        search_pattern = os.path.join(dir_name, '*.tif')
+        for filename in glob.glob(search_pattern):
+            tif_labels.append(filename)
+    return tif_labels
+
+# Extract image numbers from file paths
+def extract_image_number(file_path):
+    base_name = os.path.basename(file_path)
+    return base_name.split('_')[1].split('.')[0]
 
 def localSD(mat, n):
     mat = np.float32(mat)
@@ -15,6 +42,38 @@ def localSD(mat, n):
     sd = np.float32(cv2.sqrt(mat2))
 
     return sd
+
+def calculate_combined_label(label_path_pair):
+    # Find the path for _res.tif and _sunshad.tif labels
+    res_label_path = next(path for path in label_path_pair if path.endswith(f'_res.tif'))
+    sunshad_label_path = next(path for path in label_path_pair if path.endswith(f'_sunshad.tif'))
+
+    res_label = cv2.imread(res_label_path, cv2.IMREAD_UNCHANGED)
+    sunshad_label = cv2.imread(sunshad_label_path, cv2.IMREAD_UNCHANGED)
+
+    # Convert to binary labels
+    res_label[res_label == 255] = 1 # Nonresidue: 0, Residue: 1
+    sunshad_label[sunshad_label == 255] = 1 # Shaded: 0 , Sunlit: 1
+    return 2 * res_label + sunshad_label
+
+def calculate_class_weights(label_paths):
+    comb_labels = [] # 0-3, 4 classes total
+    for label_path_pair in label_paths:
+
+        comb_label = calculate_combined_label(label_path_pair=label_path_pair)
+        comb_labels.append(comb_label)
+
+    comb_labels = np.array(comb_labels).reshape((-1)).astype(np.int32)
+    # Train = 0.64, Validation and Test = 0.36
+    train_labels, _ = train_test_split(comb_labels, test_size=0.36, random_state=42)
+
+    # Calculate class weights
+    class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
+    class_weights = {i: class_weights[i] for i in range(len(class_weights))}
+    print('Class weights:')
+    print(class_weights)
+
+    return class_weights
 
 def get_features(bgr):
     lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
@@ -46,6 +105,21 @@ def get_features(bgr):
         ravels.append(cf.ravel().T)
     feat = np.vstack(ravels).T
     return feat
+
+# Return a list of raw features for each pixel, the combined label for each pixel, and the number of features
+def get_batch_features_and_labels(filtered_original_images, filtered_labels):
+    feats_raw, comb_labels = [], []
+    for i, path in enumerate(filtered_original_images):
+        bgr = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        label_paths = filtered_labels[i]
+        comb_label = calculate_combined_label(label_path_pair=label_paths)
+
+        features = get_features(bgr)
+
+        feats_raw.append(features)
+        comb_labels.append(comb_label)
+    
+    return feats_raw, comb_label, features.shape[1]
 
 def confusion(test_labels, predicted_classes):
     # Compute confusion matrix
