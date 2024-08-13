@@ -89,7 +89,7 @@ early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weig
 print('Training the model')
 model.fit(
     train_data_generator,
-    epochs=2,
+    epochs=20,
     callbacks=[early_stopping],
     validation_data=val_data_generator,
     class_weight=class_weights

@@ -1,11 +1,11 @@
 import cv2
 import numpy as np
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.utils import Sequence # type: ignore
+from tensorflow.keras.utils import PyDataset # type:ignore
 from sklearn.preprocessing import StandardScaler
 from utils_segmentation import get_batch_features_and_labels
 
-class ImageDataGenerator(Sequence):
+class ImageDataGenerator(PyDataset):
     def __init__(self, image_paths, label_paths, batch_size, n_features, mode, **kwargs):
         self.image_paths = image_paths
         self.label_paths = label_paths
