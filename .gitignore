@@ -352,6 +352,7 @@ slprj/
 *.lyr
 *.qgz
 
+
 *.png
 *.psb
 *.psd
@@ -371,3 +372,12 @@ slprj/
 .vscode/
 
 settings.json
+
+*.tif
+*.labeling
+*.jpg
+*.classifier
+
+*.e
+*.o
+
