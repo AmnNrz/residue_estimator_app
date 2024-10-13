@@ -381,3 +381,7 @@ settings.json
 *.e
 *.o
 
+qsubs/
+error/
+output/
+
