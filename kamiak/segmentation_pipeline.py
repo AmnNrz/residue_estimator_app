@@ -2,6 +2,7 @@ import cv2
 import os
 import logging
 from collections import defaultdict
+import time
 
 import numpy as np
 from sklearn.metrics import accuracy_score
@@ -17,13 +18,11 @@ from utils_segmentation import calculate_class_weights, confusion, extract_image
 
 logging.basicConfig(level=logging.INFO)
 
-# Enable mixed precision training
-from tensorflow.keras.mixed_precision import set_global_policy
-set_global_policy('mixed_float16')
 
 
 # Path to data
-path_to_data = "/home/a.norouzikandelati/Projects/res_app/data/images/"
+path_to_data = ("/home/a.norouzikandelati/Projects/"
+                "residue_estimator_app/kamiak/data/images/")
 
 # Find image and label paths
 print('Finding original and label paths')
@@ -103,6 +102,12 @@ print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('
 print("CUDA version", tf.sysconfig.get_build_info()['cuda_version'])
 print("cuDNN version", tf.sysconfig.get_build_info()['cudnn_version'])
 
+from tensorflow.keras.mixed_precision import set_global_policy
+from tensorflow.keras.optimizers import Adam
+
+# Enable mixed precision
+set_global_policy('mixed_float16')
+
 strategy = tf.distribute.MirroredStrategy()
 with strategy.scope():
     print('Initializing the model')
@@ -111,26 +116,23 @@ with strategy.scope():
     model.add(Dense(128, input_dim=n_features, activation='relu'))
     model.add(Dense(64, activation='relu'))
     model.add(Dense(32, activation='relu'))
-    model.add(Dense(4, activation='softmax'))
+    model.add(Dense(4, activation='softmax', dtype='float32'))
 
     # Compile the model
-    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    model.compile(
+        optimizer='adam',
+          loss='sparse_categorical_crossentropy',
+            metrics=['accuracy']
+            )
 
     # Define early stopping
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+    early_stopping = EarlyStopping(
+        monitor='val_loss', patience=5, restore_best_weights=True
+        )
 
 
-# model = Sequential()
-# model.add(Dense(128, input_dim=n_features, activation='relu'))
-# model.add(Dense(64, activation='relu'))
-# model.add(Dense(32, activation='relu'))
-# model.add(Dense(4, activation='softmax'))
-
-# # Compile the model
-# model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-
-# # Define early stopping
-# early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+# Time 
+start_time = time.time()
 
 # Train the model using the data generator
 print('Training the model')
@@ -141,6 +143,21 @@ model.fit(
     validation_data=val_data_generator,
     class_weight=class_weights
 )
+
+end_time = time.time()
+
+training_time = end_time - start_time
+
+# Convert the time into appropriate units (seconds, minutes, or hours)
+if training_time < 60:
+    print(f'Training completed in {training_time:.2f} seconds.')
+elif training_time < 3600:
+    minutes, seconds = divmod(training_time, 60)
+    print(f'Training completed in {int(minutes)} minutes and {int(seconds)} seconds.')
+else:
+    hours, remainder = divmod(training_time, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    print(f'Training completed in {int(hours)} hours, {int(minutes)} minutes, and {int(seconds)} seconds.')
 
 print('Testing the model on the test dataset')
 predictions = model.predict(test_data_generator)
